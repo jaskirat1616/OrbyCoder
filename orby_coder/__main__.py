@@ -25,20 +25,25 @@ app.command(name="ui")(ui_command)
 
 def main():
     """Main entry point for the CLI."""
-    # Print logo on startup (for non-UI commands)
-    import sys
-    if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1] not in ['ui', '--help', '--version']):
+    # Print logo on startup (for non-UI commands and when no specific command is given)
+    if len(sys.argv) == 1:
         print_logo()
-    
-    # Initialize config
-    config = ConfigManager()
-    
-    # Run the Typer app
-    try:
+        # Show help when no arguments are provided
         app()
-    except KeyboardInterrupt:
-        typer.echo("\nGoodbye! 👋")
-        sys.exit(0)
+    else:
+        # Initialize config
+        config = ConfigManager()
+        
+        # Print logo for non-UI commands only
+        if len(sys.argv) > 1 and sys.argv[1] not in ['ui', '--help', '--version', 'help']:
+            print_logo()
+        
+        # Run the Typer app
+        try:
+            app()
+        except KeyboardInterrupt:
+            typer.echo("\nGoodbye! 👋")
+            sys.exit(0)
 
 if __name__ == "__main__":
     main()

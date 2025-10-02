@@ -3,32 +3,87 @@ import typer
 from typing import Optional
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
-from textual.widgets import Header, Footer, TextArea, Static, ListView, ListItem, Label
+from textual.widgets import Header, Footer, TextArea, Static, ListView, ListItem, Label, LoadingIndicator
 from textual import events
 from rich.text import Text
+from rich.markdown import Markdown
 import asyncio
 from orby_coder.core.llm_provider import LocalLLMProvider
 from orby_coder.config.config_manager import ConfigManager
+from textual.reactive import reactive
+from textual.widgets import RichLog
+from textual.binding import Binding
+from textual.widgets._markdown import Markdown as MarkdownWidget
 
 console_app = typer.Typer()
 
-class ChatHistoryList(ListView):
-    """Display chat history."""
+class ThinkingAnimation(Static):
+    """A widget for showing a thinking animation."""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dots = 0
+        self.update(f"[italic blue]●●●[/italic blue]")
+        
+    def on_mount(self) -> None:
+        self.set_interval(0.5, self._update_dots)
+        
+    def _update_dots(self) -> None:
+        self.dots = (self.dots + 1) % 4
+        dots_str = "●" * (self.dots + 1) + "○" * (3 - self.dots)
+        self.update(f"[italic blue]{dots_str}[/italic blue]")
+
+class MessageContainer(Vertical):
+    """Container for a single message with role and content."""
+    
+    def __init__(self, role: str, content: str):
+        super().__init__()
+        self.role = role
+        self.content = content
+        
+    def compose(self) -> ComposeResult:
+        # Use markdown for content to support rich formatting
+        markdown_content = MarkdownWidget(self.content)
+        
+        if self.role == "You":
+            # User message styling
+            with Horizontal(classes="message-container user-message"):
+                yield Static("👤 You", classes="message-role user-role")
+                yield Container(markdown_content, classes="message-content user-content")
+        else:
+            # Assistant message styling
+            with Horizontal(classes="message-container assistant-message"):
+                yield Static("🤖 Orby", classes="message-role assistant-role")
+                yield Container(markdown_content, classes="message-content assistant-content")
+
+class ChatHistoryContainer(ScrollableContainer):
+    """Display chat history with proper message formatting."""
+    
     def __init__(self):
         super().__init__()
         self.messages = []
+        self.border_title = "Chat"
     
     def add_message(self, role: str, content: str):
         """Add a message to the chat history."""
-        message_text = f"[{role}]: {content[:50]}..." if len(content) > 50 else f"[{role}]: {content}"
-        self.append(ListItem(Static(message_text)))
+        message_container = MessageContainer(role, content)
+        self.mount(message_container)
+        self.scroll_end(animate=False, speed=50)
         self.messages.append((role, content))
+    
+    def clear_messages(self):
+        """Clear all messages from the chat history."""
+        for child in self.children:
+            child.remove()
+        self.messages.clear()
 
 class CodeView(ScrollableContainer):
     """Display code content."""
+    
     def __init__(self):
         super().__init__()
-        self.code_content = Static("")
+        self.border_title = "Code View"
+        self.code_content = Static("", classes="code-display")
         self.mount(self.code_content)
     
     def update_code(self, code: str):
@@ -37,10 +92,15 @@ class CodeView(ScrollableContainer):
 
 class InputWidget(TextArea):
     """Input field for prompts."""
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.show_line_numbers = False
+        self.max_content_width = 80
+        self.language = "text"
 
 class StatusBar(Static):
     """Status bar showing active model and backend."""
+    
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -48,188 +108,340 @@ class StatusBar(Static):
     
     def update_status(self):
         self.update(
-            f"Active Model: {self.config.default_model} | Backend: {self.config.backend} | "
-            f"Orby Coder v0.1.0"
+            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} "
         )
 
 class OrbyTUI(App):
-    """Main Textual application for Orby Coder."""
+    """Main Textual application for Orby Coder - closely matching Gemini CLI UI."""
     
     CSS = """
-    #chat-history-panel {
-        width: 30%;
+    Screen {
+        background: $surface;
+        layers: base floating;
+    }
+
+    Header {
+        background: $primary;
+        color: $text;
+        height: 1;
+    }
+    
+    #main-container {
+        layout: vertical;
         height: 1fr;
-        border: tall $primary;
-        margin-right: 1;
+    }
+    
+    #chat-container {
+        layout: horizontal;
+        height: 1fr;
+        border: none;
+    }
+    
+    #chat-history-panel {
+        width: 1fr;
+        height: 1fr;
+        min-width: 50;
+        border: none;
     }
     
     #code-view-panel {
-        width: 70%;
+        width: 40;
         height: 1fr;
-        border: tall $secondary;
+        border-left: solid $primary;
+        display: block;
     }
     
     #input-container {
         height: 10;
-        border: tall $accent;
-        margin-top: 1;
+        border-top: solid $primary;
+        padding: 1 1 0 1;
     }
     
-    .panel-title {
-        text-style: bold;
-        background: $primary 10%;
-        padding: 0 1;
-    }
-    
-    .status-bar {
+    #status-bar {
         height: 1;
         dock: bottom;
         background: $surface;
         color: $text;
         content-align: left middle;
+        border-top: solid $primary;
+        text-opacity: 80%;
+    }
+    
+    .message-container {
+        padding: 1 1;
+        width: 1fr;
+    }
+    
+    .user-message {
+        background: $surface;
+    }
+    
+    .assistant-message {
+        background: $panel;
+    }
+    
+    .message-role {
+        width: 15;
+        text-style: bold;
+        text-opacity: 80%;
+    }
+    
+    .user-role {
+        color: $success;
+    }
+    
+    .assistant-role {
+        color: $warning;
+    }
+    
+    .message-content {
+        width: 1fr;
+        padding-left: 1;
+    }
+    
+    .user-content {
+        color: $text;
+    }
+    
+    .assistant-content {
+        color: $text;
+    }
+    
+    .code-display {
+        background: $surface-darken-1;
+        padding: 1;
+        height: 1fr;
+    }
+    
+    .thinking-container {
+        height: 3;
+        content-align: center middle;
+        padding: 1;
+    }
+    
+    #thinking-indicator {
+        text-opacity: 60%;
+    }
+    
+    TextArea {
+        border: none;
+        background: $surface;
+        height: 1fr;
+        min-height: 5;
+    }
+    
+    .markdown {
+        text-opacity: 100%;
     }
     """
     
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("ctrl+d", "quit", "Quit"),
-        ("t", "theme_toggle", "Toggle Dark/Light"),
-        ("s", "switch_model", "Switch Model"),
+        Binding("q", "quit", "Quit", show=True),
+        Binding("ctrl+d", "quit", "Quit", show=False),
+        Binding("ctrl+c", "quit", "Quit", show=False),
+        Binding("f5", "regenerate_response", "Regenerate", show=True),
+        Binding("ctrl+r", "regenerate_response", "Regenerate", show=False),
+        Binding("ctrl+e", "toggle_code_view", "Toggle Code", show=True),
     ]
     
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.llm = LocalLLMProvider(config)
-        self.chat_history = ChatHistoryList()
+        self.chat_history = ChatHistoryContainer()
         self.code_view = CodeView()
-        self.input_widget = InputWidget(placeholder="Enter your prompt here, or 'help' for commands...")
+        self.input_widget = InputWidget(placeholder="Message Orby...")
+        self.thinking_indicator = ThinkingAnimation(id="thinking-indicator")
+        self.thinking_container = Horizontal(classes="thinking-container", id="thinking-container")
+        self.thinking_container.mount(self.thinking_indicator)
+        self.thinking_container.visible = False
+        self.input_history = []
+        self.history_index = -1
+        self.current_response = ""
         
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header(show_clock=True)
+        yield Header(name="Orby Coder", show_clock=True)
         
-        with Horizontal():
-            # Left panel: Chat history
-            with Vertical(id="chat-history-panel"):
-                yield Static("Chat History", classes="panel-title")
-                yield self.chat_history
+        with Vertical(id="main-container"):
+            with Horizontal(id="chat-container"):
+                # Left panel: Chat history
+                with Vertical(id="chat-history-panel"):
+                    yield self.chat_history
+                    yield self.thinking_container
             
-            # Right panel: Code/files view
-            with Vertical(id="code-view-panel"):
-                yield Static("Code View", classes="panel-title")
+            # Right panel: Code/files view (hidden by default)
+            with Vertical(id="code-view-panel", classes="code-panel"):
                 yield self.code_view
+                self.code_view.display = False  # Hidden by default
         
         # Bottom input bar
         with Container(id="input-container"):
             yield self.input_widget
         
         # Status bar
-        status_bar = Static()
-        status_bar.add_class("status-bar")
-        status_bar.update(
-            f"Active Model: {self.config.default_model} | Backend: {self.config.backend} | "
-            f"Orby Coder v0.1.0"
+        yield Static(
+            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} ",
+            id="status-bar"
         )
-        yield status_bar
     
     def on_mount(self) -> None:
         """Called when app starts."""
         # Focus the input widget
         self.input_widget.focus()
         
-        # Add welcome message
-        self.chat_history.add_message("System", "Welcome to Orby Coder! Type 'help' for available commands.")
+        # Add welcome message similar to Gemini CLI
+        welcome_msg = (
+            "Hello! I'm Orby, your AI coding assistant.\n\n"
+            "• Ask me to explain code\n"
+            "• Request code generation or fixes\n"
+            "• Ask me to analyze files\n"
+            "• Type 'help' for more commands"
+        )
+        self.chat_history.add_message("Orby", welcome_msg)
     
-    def on_text_area_submitted(self, message: TextArea.Submitted) -> None:
+    def on_text_area_submitted(self, message) -> None:
         """Handle text input submission."""
         if message.control == self.input_widget:
             prompt = message.control.text.strip()
             if not prompt:
                 return
             
+            # Add to input history
+            if prompt not in self.input_history:
+                self.input_history.append(prompt)
+            self.history_index = -1  # Reset history index after new input
+            
             # Check for special commands
             if prompt.lower() == 'help':
                 help_text = (
-                    "Commands:\n"
-                    "- Type 'help' to see this message\n"
-                    "- Type 'models' to list available models\n"
-                    "- Type 'config' to see current config\n"
-                    "- Type 'clear' to clear chat history\n"
-                    "- Type 'quit' or 'exit' to quit\n"
-                    "- Any other text is sent to the AI"
+                    "**Available Commands:**\n\n"
+                    "- `help` - Show this help message\n"
+                    "- `models` - List available models\n"
+                    "- `config` - Show current configuration\n"
+                    "- `clear` - Clear chat history\n"
+                    "- `quit` or `exit` - Exit the application\n"
+                    "- `temperature <value>` - Set temperature (0.0-1.0)\n\n"
+                    "**General Usage:**\n"
+                    "Ask about code, request implementations, or explain concepts."
                 )
-                self.chat_history.add_message("System", help_text)
+                self.chat_history.add_message("Orby", help_text)
                 self.input_widget.text = ""
                 return
             elif prompt.lower() == 'models':
                 try:
                     models = self.llm.list_models()
                     models_list = "\n".join([f"- {model}" for model in models])
-                    self.chat_history.add_message("System", f"Available models:\n{models_list}")
+                    self.chat_history.add_message("Orby", f"**Available models:**\n{models_list}")
                 except Exception as e:
-                    self.chat_history.add_message("System", f"Error listing models: {str(e)}")
+                    self.chat_history.add_message("Orby", f"**Error listing models:** {str(e)}")
                 self.input_widget.text = ""
                 return
             elif prompt.lower() == 'config':
                 config_info = (
-                    f"Backend: {self.config.backend}\n"
-                    f"Default Model: {self.config.default_model}\n"
-                    f"LM Studio URL: {self.config.lmstudio_base_url}\n"
-                    f"System Prompt: {self.config.system_prompt[:50]}..."
+                    f"**Configuration:**\n"
+                    f"- Backend: {self.config.backend}\n"
+                    f"- Default Model: {self.config.default_model}\n"
+                    f"- LM Studio URL: {self.config.lmstudio_base_url}\n"
+                    f"- Ollama URL: {self.config.ollama_base_url}\n"
+                    f"- Temperature: {self.config.temperature}"
                 )
-                self.chat_history.add_message("System", config_info)
+                self.chat_history.add_message("Orby", config_info)
                 self.input_widget.text = ""
                 return
             elif prompt.lower() in ['clear', 'cls']:
-                self.chat_history.clear()
-                self.chat_history.add_message("System", "Chat history cleared.")
+                # Clear the chat history
+                for child in self.chat_history.children:
+                    if child != self.thinking_container:
+                        child.remove()
+                self.chat_history.messages.clear()
+                self.chat_history.add_message("Orby", "Chat history cleared. How can I help you?")
                 self.input_widget.text = ""
                 return
-            elif prompt.lower() in ['quit', 'exit']:
+            elif prompt.lower() in ['quit', 'exit', 'q']:
                 self.exit()
+                return
+            elif prompt.lower().startswith('temperature '):
+                try:
+                    temp_str = prompt.lower().split(' ', 1)[1]
+                    temp_value = float(temp_str)
+                    if 0.0 <= temp_value <= 1.0:
+                        self.config.temperature = temp_value
+                        # Update the config manager as well
+                        config_manager = ConfigManager()
+                        updated_config = config_manager.get_current_config()
+                        updated_config.temperature = temp_value
+                        config_manager.save_config(updated_config)
+                        
+                        self.chat_history.add_message("Orby", f"**Temperature set to:** {temp_value}")
+                    else:
+                        self.chat_history.add_message("Orby", "**Temperature must be between 0.0 and 1.0**")
+                except (ValueError, IndexError):
+                    self.chat_history.add_message("Orby", "**Invalid temperature command. Use: `temperature <value>`**")
+                self.input_widget.text = ""
                 return
             
             # Add user message to history
             self.chat_history.add_message("You", prompt)
             
+            # Show thinking indicator
+            self.thinking_container.visible = True
+            self.chat_history.scroll_end(animate=True, speed=50)
+            
+            # Process with AI in a separate call to prevent UI blocking
+            self._process_ai_response(prompt)
+            
+            # Clear input
+            self.input_widget.text = ""
+    
+    def _process_ai_response(self, prompt: str):
+        """Process AI response."""
+        try:
             # Process with AI
             messages = [
                 {"role": "system", "content": self.config.system_prompt},
                 {"role": "user", "content": prompt}
             ]
             
-            try:
-                # Get response from LLM
-                response = self.llm.chat_complete(messages)
-                
-                # Add AI response to history
-                self.chat_history.add_message("Orby", response)
-                
-                # If response contains code, display it in the code view
-                if "```" in response:
-                    # Simple extraction of first code block
-                    parts = response.split("```")
-                    if len(parts) > 1:
-                        code_block = parts[1].split('\n', 1)[-1]  # Remove language specifier line
-                        code_block = code_block.rsplit('\n', 1)[0]  # Remove closing ```
-                        self.code_view.update_code(code_block)
-                
-            except Exception as e:
-                self.chat_history.add_message("System", f"Error: {str(e)}")
+            # Get response from LLM
+            response = self.llm.chat_complete(messages)
             
-            # Clear input
-            self.input_widget.text = ""
-            self.input_widget.focus()
+            # Add AI response to history
+            self.chat_history.add_message("Orby", response)
+            
+            # If response contains code, display it in the code view
+            if "```" in response:
+                # Simple extraction of first code block
+                parts = response.split("```")
+                if len(parts) > 1:
+                    code_block = parts[1].split('\n', 1)[-1]  # Remove language specifier line
+                    if '\n' in code_block:
+                        code_block = code_block.rsplit('\n', 1)[0]  # Remove closing ```
+                    self.code_view.update_code(code_block)
+                    self.code_view.display = True  # Show code panel if there's code
+        
+        except Exception as e:
+            self.chat_history.add_message("Orby", f"**Error:** {str(e)}")
+        finally:
+            # Hide thinking indicator
+            self.thinking_container.visible = False
+            self.chat_history.scroll_end(animate=True, speed=50)
     
-    def action_theme_toggle(self) -> None:
-        """Toggle between dark and light mode."""
-        self.dark = not self.dark
+    def action_quit(self) -> None:
+        """Quit the application."""
+        self.exit()
     
-    def action_switch_model(self) -> None:
-        """Switch to a different model."""
-        # This would open a model selection dialog in a full implementation
-        self.chat_history.add_message("System", "Model switching functionality would open here.")
+    def action_toggle_code_view(self) -> None:
+        """Toggle the code view panel."""
+        self.code_view.display = not self.code_view.display
+    
+    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
+        """Handle focus events to keep input focused."""
+        pass
+    
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Handle text changes for input history."""
+        pass
 
 def ui_command(
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use for inference")

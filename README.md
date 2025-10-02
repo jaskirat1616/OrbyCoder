@@ -24,64 +24,42 @@ Orby Coder is an open-source AI CLI tool designed for coding and development. It
 pip install orby-coder
 ```
 
-## 📖 Usage
+## 💻 How to Run
 
-### Chat Command
-
-Start a chat session or process a single prompt:
-
+### Interactive UI (Recommended)
 ```bash
-# Interactive chat
+orby ui
+```
+This launches the Gemini CLI-like interface with chat panel and code viewer.
+
+### Other Commands
+```bash
+# Interactive chat mode
 orby chat
 
-# Single prompt
+# Single prompt chat
 orby chat "Explain how this function works" --file my_function.py
 
-# Specify model
-orby chat "Write a Python function to sort a list" --model llama3.2
-```
-
-### Code Command
-
-Generate or modify code:
-
-```bash
-# Generate code
+# Code generation
 orby code "Create a Python class for a binary tree"
 
-# Modify existing file
-orby code "Add error handling to this function" --file my_file.py
-
-# Output to specific file
-orby code "Create a Flask API endpoint" --output api.py
-```
-
-### Run Command
-
-Execute files and get AI analysis:
-
-```bash
-# Run a Python script
-orby run script.py
-
-# Run with explanation
+# Run a file with AI analysis
 orby run script.py --explain
 
-# Run with specific model
-orby run script.py --model mistral --explain
+# Get help
+orby --help
+orby chat --help
 ```
 
-### Interactive UI
+### Interactive UI Features
 
-Launch the Textual-based TUI:
-
-```bash
-# Start the interactive UI
-orby ui
-
-# Start with specific model
-orby ui --model llama3.2
-```
+The UI features a Gemini CLI-like interface:
+- Left panel: Chat history with message bubbles
+- Right panel: Code viewer (toggles when code is detected)
+- Bottom: Input field with "Message Orby..." placeholder
+- Top: Header with app name and clock
+- Bottom: Status bar showing active model
+- Animated "typing" indicator when AI is responding
 
 ## ⚙️ Configuration
 

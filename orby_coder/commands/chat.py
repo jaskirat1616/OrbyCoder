@@ -4,8 +4,13 @@ from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
+from rich.spinner import Spinner
+from rich.live import Live
+from rich.text import Text
 from orby_coder.core.llm_provider import LocalLLMProvider
 from orby_coder.config.config_manager import ConfigManager
+import threading
+import time
 
 console = Console()
 app = typer.Typer()
@@ -13,35 +18,80 @@ app = typer.Typer()
 def chat_command(
     prompt: Optional[str] = typer.Argument(None, help="The prompt to send to the AI"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use for inference"),
-    stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream the response")
+    stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream the response"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", "-t", min=0.0, max=1.0, help="Set the temperature for the model (0.0-1.0)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose output")
 ):
     """Start an interactive chat session or process a single prompt."""
     config_manager = ConfigManager()
     config = config_manager.get_current_config()
+    
+    # Update temperature if provided
+    if temperature is not None:
+        config.temperature = temperature
+    
     llm = LocalLLMProvider(config)
     
     # If no prompt provided, start interactive mode
     if not prompt:
         console.print("[bold green]Starting Orby Coder Chat...[/bold green]")
-        console.print("Type 'exit' to quit, 'model' to change model, 'config' to see config\n")
+        console.print("Type 'help' for commands, 'exit' to quit\n")
         
-        # Simple interactive chat loop
+        # Interactive chat loop with more Gemini CLI-like features
         while True:
             user_input = console.input("[bold blue]You:[/bold blue] ")
             
             if user_input.lower() in ['exit', 'quit', 'q']:
                 console.print("[bold green]Goodbye![/bold green]")
                 break
-            elif user_input.lower() == 'config':
-                console.print(f"[yellow]Backend:[/yellow] {config.backend}")
-                console.print(f"[yellow]Model:[/yellow] {config.default_model}")
-                console.print(f"[yellow]System Prompt:[/yellow] {config.system_prompt[:50]}...")
+            elif user_input.lower() == 'help':
+                help_text = (
+                    "[bold]Available Commands:[/bold]\n"
+                    "• [green]help[/green] - Show this help message\n"
+                    "• [green]models[/green] - List available models\n"
+                    "• [green]config[/green] - Show current configuration\n"
+                    "• [green]temperature <value>[/green] - Set temperature (0.0-1.0)\n"
+                    "• [green]clear[/green] - Clear screen\n"
+                    "• [green]exit/quit/q[/green] - Exit the application\n"
+                    "\n[bold]Usage:[/bold] Type any prompt to chat with Orby."
+                )
+                console.print(Panel(help_text, title="Help"))
                 continue
-            elif user_input.lower().startswith('model '):
-                # Change model command
-                new_model = user_input[6:].strip()  # Remove 'model ' prefix
-                config.default_model = new_model
-                console.print(f"[green]Model changed to:[/green] {new_model}")
+            elif user_input.lower() == 'models':
+                try:
+                    models = llm.list_models()
+                    models_list = "\n".join([f"• {model}" for model in models])
+                    console.print(Panel(models_list, title="Available Models"))
+                except Exception as e:
+                    console.print(f"[red]Error listing models:[/red] {str(e)}")
+                continue
+            elif user_input.lower() == 'config':
+                config_info = (
+                    f"Backend: {config.backend}\n"
+                    f"Default Model: {config.default_model}\n"
+                    f"LM Studio URL: {config.lmstudio_base_url}\n"
+                    f"Ollama URL: {config.ollama_base_url}\n"
+                    f"Temperature: {config.temperature}\n"
+                    f"System Prompt: {config.system_prompt[:50]}..."
+                )
+                console.print(Panel(config_info, title="Configuration"))
+                continue
+            elif user_input.lower().startswith('temperature '):
+                try:
+                    temp_str = user_input.split(' ', 1)[1]
+                    temp_value = float(temp_str)
+                    if 0.0 <= temp_value <= 1.0:
+                        config.temperature = temp_value
+                        # Update the config manager as well
+                        config_manager.save_config(config)
+                        console.print(f"[green]Temperature set to:[/green] {temp_value}")
+                    else:
+                        console.print("[red]Temperature must be between 0.0 and 1.0[/red]")
+                except (ValueError, IndexError):
+                    console.print("[red]Invalid temperature command. Use: temperature <value>[/red]")
+                continue
+            elif user_input.lower() in ['clear', 'cls']:
+                console.clear()
                 continue
             
             # Prepare messages for the AI
@@ -50,6 +100,53 @@ def chat_command(
                 {"role": "user", "content": user_input}
             ]
             
+            # Show a thinking indicator before processing
+            if verbose:
+                spinner = Spinner("clock", "Orby is thinking...")
+                with Live(spinner, console=console, refresh_per_second=10) as live:
+                    time.sleep(0.5)  # Brief pause to show thinking
+                    if stream:
+                        response = ""
+                        for chunk in llm.stream_chat(messages, model):
+                            response += chunk
+                        live.update(Panel(Markdown(response), title="Orby's Response"))
+                        time.sleep(0.1)  # Brief pause before showing response
+                    else:
+                        response = llm.chat_complete(messages, model)
+                        live.update(Panel(Markdown(response), title="Orby's Response"))
+                        time.sleep(0.1)  # Brief pause before showing response
+            else:
+                if stream:
+                    console.print("[bold yellow]Orby:[/bold yellow] ", end="")
+                    response = ""
+                    for chunk in llm.stream_chat(messages, model):
+                        console.print(chunk, end="", markup=False)
+                        response += chunk
+                    console.print()  # New line after streaming
+                else:
+                    response = llm.chat_complete(messages, model)
+                    panel = Panel(Markdown(response), title="Orby's Response")
+                    console.print(panel)
+    else:
+        # Process single prompt
+        messages = [
+            {"role": "system", "content": config.system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+        
+        if verbose:
+            spinner = Spinner("clock", "Orby is thinking...")
+            with Live(spinner, console=console, refresh_per_second=10) as live:
+                time.sleep(0.5)  # Brief pause to show thinking
+                if stream:
+                    response = ""
+                    for chunk in llm.stream_chat(messages, model):
+                        response += chunk
+                    live.update(Panel(Markdown(response), title="Orby's Response"))
+                else:
+                    response = llm.chat_complete(messages, model)
+                    live.update(Panel(Markdown(response), title="Orby's Response"))
+        else:
             if stream:
                 console.print("[bold yellow]Orby:[/bold yellow] ", end="")
                 response = ""
@@ -61,21 +158,3 @@ def chat_command(
                 response = llm.chat_complete(messages, model)
                 panel = Panel(Markdown(response), title="Orby's Response")
                 console.print(panel)
-    else:
-        # Process single prompt
-        messages = [
-            {"role": "system", "content": config.system_prompt},
-            {"role": "user", "content": prompt}
-        ]
-        
-        if stream:
-            console.print("[bold yellow]Orby:[/bold yellow] ", end="")
-            response = ""
-            for chunk in llm.stream_chat(messages, model):
-                console.print(chunk, end="", markup=False)
-                response += chunk
-            console.print()  # New line after streaming
-        else:
-            response = llm.chat_complete(messages, model)
-            panel = Panel(Markdown(response), title="Orby's Response")
-            console.print(panel)
