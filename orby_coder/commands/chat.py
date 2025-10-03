@@ -52,6 +52,7 @@ def chat_command(
                     "[bold]Available Commands:[/bold]\n"
                     "• [green]help[/green] - Show this help message\n"
                     "• [green]models[/green] - List available models\n"
+                    "• [green]model <name>[/green] - Change current model\n"
                     "• [green]config[/green] - Show current configuration\n"
                     "• [green]system[/green] - Show system information\n"
                     "• [green]temperature <value>[/green] - Set temperature (0.0-1.0)\n"
@@ -74,6 +75,24 @@ def chat_command(
                         console.print("[yellow]No models found or backend not accessible.[/yellow]")
                 except Exception as e:
                     console.print(f"[red]Error listing models:[/red] {str(e)}")
+                continue
+            elif user_input.lower().startswith('model '):
+                # Change the current model
+                new_model = user_input[6:].strip()  # Remove 'model ' prefix
+                if new_model:
+                    # Validate that the model exists or at least has proper format
+                    if len(new_model) > 0:
+                        # Update the config with the new model
+                        config.default_model = new_model
+                        config_manager.save_config(config)
+                        console.print(f"[green]Model changed to:[/green] {new_model}")
+                        console.print(f"[blue]Current model:[/blue] {config.default_model}")
+                    else:
+                        console.print("[red]Please specify a model name.[/red]")
+                        console.print("[yellow]Usage:[/yellow] model <model_name>")
+                else:
+                    console.print("[red]Please specify a model name.[/red]")
+                    console.print("[yellow]Usage:[/yellow] model <model_name>")
                 continue
             elif user_input.lower() == 'config':
                 config_info = (
