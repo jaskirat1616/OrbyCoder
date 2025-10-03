@@ -71,6 +71,19 @@ The UI features a Gemini CLI-like interface:
 - Top: Header with app name and clock
 - Bottom: Status bar showing active model
 - Animated "typing" indicator when AI is responding
+
+### Interactive Chat Commands
+
+In the interactive chat mode, you can use these special commands:
+- `help` - Show help message
+- `models` - List available models
+- `model <name>` - Change current model
+- `config` - Show current configuration
+- `temperature <value>` - Set temperature (0.0-1.0)
+- `clear` - Clear screen
+- `execute: command` - Execute terminal command
+- `search: query` - Search the web
+- `exit/quit/q` - Exit the application
 - IDE integration controls
 - Online search integration
 
