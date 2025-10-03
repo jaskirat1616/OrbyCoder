@@ -3,6 +3,7 @@ import typer
 from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
+from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.spinner import Spinner
 from rich.live import Live
@@ -12,6 +13,7 @@ import time
 from pathlib import Path
 from orby_coder.core.llm_provider import LocalLLMProvider
 from orby_coder.config.config_manager import ConfigManager
+from orby_coder.utils.advanced import TerminalExecutor, IDEIntegration, get_git_info, is_git_repo
 
 console = Console()
 app = typer.Typer()
@@ -22,16 +24,31 @@ def run_command(
     explain: bool = typer.Option(False, "--explain", "-e", help="Explain the code before running it"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Run with debugging output"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose output"),
-    analyze: bool = typer.Option(False, "--analyze", "-a", help="Analyze code for potential issues")
+    analyze: bool = typer.Option(False, "--analyze", "-a", help="Analyze code for potential issues"),
+    git_info: bool = typer.Option(False, "--git", "-g", help="Show git info for the project")
 ):
     """Execute a file and optionally explain or debug it."""
     config_manager = ConfigManager()
     config = config_manager.get_current_config()
     llm = LocalLLMProvider(config)
+    ide_integration = IDEIntegration(config)
     
     if not file.exists():
         console.print(f"[red]Error:[/red] File '{file}' does not exist")
         raise typer.Exit(code=1)
+    
+    # Show git info if requested
+    if git_info and is_git_repo(str(file.parent)):
+        git_data = get_git_info(str(file.parent))
+        if 'error' not in git_data:
+            git_panel = Panel(
+                f"Branch: {git_data['active_branch']}\n"
+                f"Dirty: {git_data['is_dirty']}\n"
+                f"Remote: {git_data['remote_url']}\n"
+                f"Latest: {git_data['latest_commit']['message'][:50]}...",
+                title="Git Info"
+            )
+            console.print(git_panel)
     
     # Determine the command to run based on file extension
     ext = file.suffix.lower()
@@ -180,3 +197,18 @@ def run_command(
                 analysis = llm.chat_complete(messages, model)
                 panel = Panel(Markdown(analysis), title="Output Analysis")
                 console.print(panel)
+        
+        # Option to open in editor after running
+        open_editor = typer.confirm("Would you like to open the file in an editor?")
+        if open_editor:
+            editor_choice = typer.prompt("Which editor? (vscode/cursor)", default="vscode", type=typer.Choice(["vscode", "cursor"]))
+            if editor_choice.lower() == 'vscode':
+                if ide_integration.open_file_in_vscode(str(file)):
+                    console.print(f"[green]Opened {file} in VSCode[/green]")
+                else:
+                    console.print(f"[red]Failed to open {file} in VSCode[/red]")
+            elif editor_choice.lower() == 'cursor':
+                if ide_integration.open_file_in_cursor(str(file)):
+                    console.print(f"[green]Opened {file} in Cursor[/green]")
+                else:
+                    console.print(f"[red]Failed to open {file} in Cursor[/red]")

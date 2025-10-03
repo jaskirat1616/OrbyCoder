@@ -6,6 +6,11 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict, field
 
 @dataclass
+class IDEIntegrationConfig:
+    vscode_path: str = "/usr/bin/code"
+    cursor_path: str = "/usr/bin/cursor"
+
+@dataclass
 class ModelConfig:
     backend: str = "ollama"  # "ollama" or "lmstudio"
     default_model: str = "llama3.2"
@@ -14,6 +19,9 @@ class ModelConfig:
     system_prompt: str = "You are an expert software developer. Provide helpful and accurate coding assistance."
     temperature: float = 0.7
     max_tokens: Optional[int] = None
+    enable_online_search: bool = True
+    enable_terminal_execution: bool = True
+    ide_integration: IDEIntegrationConfig = field(default_factory=IDEIntegrationConfig)
 
 class ConfigManager:
     """Manages configuration settings for Orby Coder."""
@@ -35,6 +43,12 @@ class ConfigManager:
                 with open(self.config_file, 'r') as f:
                     data = json.load(f)
                     # Handle potential missing fields in old config files
+                    ide_config_data = data.get('ide_integration', {})
+                    ide_config = IDEIntegrationConfig(
+                        vscode_path=ide_config_data.get('vscode_path', '/usr/bin/code'),
+                        cursor_path=ide_config_data.get('cursor_path', '/usr/bin/cursor')
+                    )
+                    
                     config_dict = {
                         'backend': data.get('backend', 'ollama'),
                         'default_model': data.get('default_model', 'llama3.2'),
@@ -42,7 +56,10 @@ class ConfigManager:
                         'ollama_base_url': data.get('ollama_base_url', 'http://localhost:11434/api'),
                         'system_prompt': data.get('system_prompt', 'You are an expert software developer. Provide helpful and accurate coding assistance.'),
                         'temperature': data.get('temperature', 0.7),
-                        'max_tokens': data.get('max_tokens')
+                        'max_tokens': data.get('max_tokens'),
+                        'enable_online_search': data.get('enable_online_search', True),
+                        'enable_terminal_execution': data.get('enable_terminal_execution', True),
+                        'ide_integration': ide_config
                     }
                     return ModelConfig(**config_dict)
             except (json.JSONDecodeError, TypeError, KeyError) as e:
@@ -57,8 +74,10 @@ class ConfigManager:
     
     def save_config(self, config: ModelConfig):
         """Save configuration to file."""
+        # Convert to dict but handle the nested dataclass
+        config_dict = asdict(config)
         with open(self.config_file, 'w') as f:
-            json.dump(asdict(config), f, indent=2)
+            json.dump(config_dict, f, indent=2)
     
     def get_current_config(self) -> ModelConfig:
         """Get the current configuration."""

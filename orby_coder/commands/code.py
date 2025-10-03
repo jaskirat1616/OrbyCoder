@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from orby_coder.core.llm_provider import LocalLLMProvider
 from orby_coder.config.config_manager import ConfigManager
+from orby_coder.utils.advanced import copy_to_clipboard, IDEIntegration
 import time
 
 console = Console()
@@ -23,12 +24,15 @@ def code_command(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file for generated code"),
     stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream the response"),
     explain: bool = typer.Option(False, "--explain", "-e", help="Explain the generated code"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose output")
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose output"),
+    clipboard: bool = typer.Option(False, "--clipboard", "-c", help="Copy generated code to clipboard"),
+    open_in_editor: Optional[str] = typer.Option(None, "--editor", help="Open file in editor (vscode, cursor)")
 ):
     """Generate, modify, or explain code based on a prompt."""
     config_manager = ConfigManager()
     config = config_manager.get_current_config()
     llm = LocalLLMProvider(config)
+    ide_integration = IDEIntegration(config)
     
     # Prepare the system prompt for code generation
     system_prompt = f"{config.system_prompt} You are an expert software developer. When providing code, always format it with proper syntax highlighting and include helpful comments."
@@ -128,16 +132,49 @@ def code_command(
             panel = Panel(Markdown(explanation), title="Code Explanation")
             console.print(panel)
     
+    # Copy to clipboard if requested
+    if clipboard and response:
+        if copy_to_clipboard(response):
+            console.print(f"\n[green]Code copied to clipboard![/green]")
+        else:
+            console.print(f"\n[red]Failed to copy to clipboard[/red]")
+    
     # If output file is specified, write the response to it
     if output:
         with open(output, 'w') as f:
             f.write(response)
         console.print(f"\n[green]Code written to:[/green] {output}")
+        
+        # Open in editor if requested
+        if open_in_editor:
+            if open_in_editor.lower() == 'vscode':
+                if ide_integration.open_file_in_vscode(str(output)):
+                    console.print(f"[green]Opened {output} in VSCode[/green]")
+                else:
+                    console.print(f"[red]Failed to open {output} in VSCode[/red]")
+            elif open_in_editor.lower() == 'cursor':
+                if ide_integration.open_file_in_cursor(str(output)):
+                    console.print(f"[green]Opened {output} in Cursor[/green]")
+                else:
+                    console.print(f"[red]Failed to open {output} in Cursor[/red]")
     
     # If input file was specified and no output file is specified, ask if user wants to save
-    if file and not output:
+    elif file and not output:
         save_choice = typer.confirm("Do you want to save the changes to the original file?")
         if save_choice:
             with open(file, 'w') as f:
                 f.write(response)
             console.print(f"[green]Changes saved to:[/green] {file}")
+            
+            # Open in editor if requested
+            if open_in_editor:
+                if open_in_editor.lower() == 'vscode':
+                    if ide_integration.open_file_in_vscode(str(file)):
+                        console.print(f"[green]Opened {file} in VSCode[/green]")
+                    else:
+                        console.print(f"[red]Failed to open {file} in VSCode[/red]")
+                elif open_in_editor.lower() == 'cursor':
+                    if ide_integration.open_file_in_cursor(str(file)):
+                        console.print(f"[green]Opened {file} in Cursor[/green]")
+                    else:
+                        console.print(f"[red]Failed to open {file} in Cursor[/red]")

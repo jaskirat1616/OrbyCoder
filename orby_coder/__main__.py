@@ -18,10 +18,10 @@ app = typer.Typer(
 )
 
 # Add commands to the app
-app.command(name="chat")(chat_command)
-app.command(name="code")(code_command)
-app.command(name="run")(run_command)
-app.command(name="ui")(ui_command)
+app.command(name="chat", help="Start an interactive chat session or process a single prompt.")(chat_command)
+app.command(name="code", help="Generate, modify, or explain code based on a prompt.")(code_command)
+app.command(name="run", help="Execute a file and optionally explain or debug it.")(run_command)
+app.command(name="ui", help="Launch the Textual-based interactive UI.")(ui_command)
 
 def main():
     """Main entry point for the CLI."""

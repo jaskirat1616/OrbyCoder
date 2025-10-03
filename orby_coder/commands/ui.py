@@ -14,6 +14,7 @@ from textual.reactive import reactive
 from textual.widgets import RichLog
 from textual.binding import Binding
 from textual.widgets._markdown import Markdown as MarkdownWidget
+from orby_coder.utils.advanced import TerminalExecutor, WebSearcher, IDEIntegration
 
 console_app = typer.Typer()
 
@@ -62,8 +63,8 @@ class ChatHistoryContainer(ScrollableContainer):
     def __init__(self):
         super().__init__()
         self.messages = []
-        self.border_title = "Chat"
         self._messages_to_add = []  # Store messages until mounted
+        self.border_title = "Chat"
     
     def compose(self) -> ComposeResult:
         """Compose the widget."""
@@ -125,7 +126,7 @@ class StatusBar(Static):
     
     def update_status(self):
         self.update(
-            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} "
+            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} | Online: {'ON' if self.config.enable_online_search else 'OFF'} | Terminal: {'ON' if self.config.enable_terminal_execution else 'OFF'} "
         )
 
 class OrbyTUI(App):
@@ -259,12 +260,15 @@ class OrbyTUI(App):
         Binding("f5", "regenerate_response", "Regenerate", show=True),
         Binding("ctrl+r", "regenerate_response", "Regenerate", show=False),
         Binding("ctrl+e", "toggle_code_view", "Toggle Code", show=True),
+        Binding("ctrl+t", "terminal_panel", "Terminal", show=True),
+        Binding("ctrl+s", "search_panel", "Search", show=True),
     ]
     
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.llm = LocalLLMProvider(config)
+        self.ide_integration = IDEIntegration(config)
         self.chat_history = ChatHistoryContainer()
         self.code_view = CodeView()
         self.input_widget = InputWidget(placeholder="Message Orby...")
@@ -285,11 +289,11 @@ class OrbyTUI(App):
                 with Vertical(id="chat-history-panel"):
                     yield self.chat_history
                     yield self.thinking_container  # Add container to the layout
-            
-            # Right panel: Code/files view (hidden by default)
-            with Vertical(id="code-view-panel", classes="code-panel"):
-                yield self.code_view
-                self.code_view.display = False  # Hidden by default
+                
+                # Right panel: Code/files view (hidden by default)
+                with Vertical(id="code-view-panel", classes="code-panel"):
+                    yield self.code_view
+                    self.code_view.display = False  # Hidden by default
         
         # Bottom input bar
         with Container(id="input-container"):
@@ -297,7 +301,7 @@ class OrbyTUI(App):
         
         # Status bar
         yield Static(
-            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} ",
+            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} | Online: {'ON' if self.config.enable_online_search else 'OFF'} | Terminal: {'ON' if self.config.enable_terminal_execution else 'OFF'} ",
             id="status-bar"
         )
     
@@ -306,36 +310,6 @@ class OrbyTUI(App):
         # Add the thinking indicator to its container after both are mounted
         self.thinking_container.mount(self.thinking_indicator)
         
-    def compose(self) -> ComposeResult:
-        """Create child widgets for the app."""
-        yield Header(name="Orby Coder", show_clock=True)
-        
-        with Vertical(id="main-container"):
-            with Horizontal(id="chat-container"):
-                # Left panel: Chat history
-                with Vertical(id="chat-history-panel"):
-                    yield self.chat_history
-                    # Add thinking indicator to the container
-                    self.thinking_container.compose_add_child(self.thinking_indicator)
-                    yield self.thinking_container
-            
-            # Right panel: Code/files view (hidden by default)
-            with Vertical(id="code-view-panel", classes="code-panel"):
-                yield self.code_view
-                self.code_view.display = False  # Hidden by default
-        
-        # Bottom input bar
-        with Container(id="input-container"):
-            yield self.input_widget
-        
-        # Status bar
-        yield Static(
-            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} ",
-            id="status-bar"
-        )
-    
-    def on_mount(self) -> None:
-        """Called when app starts."""
         # Focus the input widget
         self.input_widget.focus()
         
@@ -345,10 +319,11 @@ class OrbyTUI(App):
             "• Ask me to explain code\n"
             "• Request code generation or fixes\n"
             "• Ask me to analyze files\n"
-            "• Type 'help' for more commands"
+            "• Type 'help' for more commands\n"
+            "• Use Ctrl+T for Terminal commands, Ctrl+S for Web Search"
         )
         self.chat_history.add_message("Orby", welcome_msg)
-    
+
     def on_text_area_submitted(self, message) -> None:
         """Handle text input submission."""
         if message.control == self.input_widget:
@@ -368,9 +343,13 @@ class OrbyTUI(App):
                     "- `help` - Show this help message\n"
                     "- `models` - List available models\n"
                     "- `config` - Show current configuration\n"
+                    "- `system` - Show system information\n"
                     "- `clear` - Clear chat history\n"
                     "- `quit` or `exit` - Exit the application\n"
                     "- `temperature <value>` - Set temperature (0.0-1.0)\n\n"
+                    "**Advanced Usage:**\n"
+                    f"- `execute: command` - Execute terminal command (enabled: {self.config.enable_terminal_execution})\n"
+                    f"- `search: query` - Web search (enabled: {self.config.enable_online_search})\n\n"
                     "**General Usage:**\n"
                     "Ask about code, request implementations, or explain concepts."
                 )
@@ -393,9 +372,27 @@ class OrbyTUI(App):
                     f"- Default Model: {self.config.default_model}\n"
                     f"- LM Studio URL: {self.config.lmstudio_base_url}\n"
                     f"- Ollama URL: {self.config.ollama_base_url}\n"
-                    f"- Temperature: {self.config.temperature}"
+                    f"- Temperature: {self.config.temperature}\n"
+                    f"- Online Search: {self.config.enable_online_search}\n"
+                    f"- Terminal Execution: {self.config.enable_terminal_execution}\n"
+                    f"- VSCode Path: {self.config.ide_integration.vscode_path}\n"
+                    f"- Cursor Path: {self.config.ide_integration.cursor_path}"
                 )
                 self.chat_history.add_message("Orby", config_info)
+                self.input_widget.text = ""
+                return
+            elif prompt.lower() == 'system':
+                import psutil
+                cpu_percent = psutil.cpu_percent(interval=1)
+                memory = psutil.virtual_memory()
+                
+                sys_info = (
+                    f"**System Information:**\n"
+                    f"- CPU Usage: {cpu_percent}%\n"
+                    f"- Memory: {memory.percent}% used ({memory.available // (1024**3)}GB free)\n"
+                    f"- Disk: {psutil.disk_usage('/').percent:.1f}% used"
+                )
+                self.chat_history.add_message("Orby", sys_info)
                 self.input_widget.text = ""
                 return
             elif prompt.lower() in ['clear', 'cls']:
@@ -430,6 +427,49 @@ class OrbyTUI(App):
                 self.input_widget.text = ""
                 return
             
+            # Check for special execution commands
+            prompt_lower = prompt.lower()
+            if prompt_lower.startswith('execute:') or prompt_lower.startswith('run:'):
+                if self.config.enable_terminal_execution:
+                    command = prompt[8:].strip()  # Remove 'execute:' or 'run:'
+                    if TerminalExecutor.safe_command(command):
+                        self.chat_history.add_message("You", f"**EXECUTING:** {command}")
+                        result = TerminalExecutor.execute_command(command)
+                        if result['success']:
+                            response = f"**Command succeeded:**\n```\n{result['stdout']}\n```"
+                            if result['stderr']:
+                                response += f"\n**Errors:**\n```\n{result['stderr']}\n```"
+                        else:
+                            response = f"**Command failed:**\n```\n{result['stderr']}\n```"
+                        self.chat_history.add_message("Orby", response)
+                    else:
+                        self.chat_history.add_message("Orby", "** Unsafe command blocked:** " + command)
+                else:
+                    self.chat_history.add_message("Orby", "**Terminal execution is disabled in configuration.**")
+                self.input_widget.text = ""
+                return
+            elif prompt_lower.startswith('search:') or prompt_lower.startswith('find:'):
+                if self.config.enable_online_search:
+                    query = prompt[7:].strip()  # Remove 'search:' or 'find:'
+                    self.chat_history.add_message("You", f"**SEARCHING:** {query}")
+                    
+                    # Create web searcher instance
+                    web_searcher = WebSearcher()
+                    results = web_searcher.search(query)
+                    
+                    if results:
+                        response = f"**Search results for '{query}':**\n\n"
+                        for i, result in enumerate(results[:3]):  # Show top 3 results
+                            response += f"{i+1}. **{result['title']}**\n   {result['snippet'][:200]}...\n\n"
+                    else:
+                        response = f"**No search results found for:** {query}"
+                    
+                    self.chat_history.add_message("Orby", response)
+                else:
+                    self.chat_history.add_message("Orby", "**Online search is disabled in configuration.**")
+                self.input_widget.text = ""
+                return
+            
             # Add user message to history
             self.chat_history.add_message("You", prompt)
             
@@ -452,8 +492,8 @@ class OrbyTUI(App):
                 {"role": "user", "content": prompt}
             ]
             
-            # Get response from LLM
-            response = self.llm.chat_complete(messages)
+            # Get response from LLM with context enabled
+            response = self.llm.chat_complete(messages, enable_context=True)
             
             # Add AI response to history
             self.chat_history.add_message("Orby", response)

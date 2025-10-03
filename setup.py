@@ -10,7 +10,7 @@ setup(
     name="orby-coder",
     version="0.1.0",
     author="Orby Project Contributors",
-    description="Orby Coder - An open-source AI CLI tool for coding and development",
+    description="Orby Coder - An open-source AI CLI tool for coding and development with IDE integration",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/jaskirat1616/OrbyCoder",
@@ -36,11 +36,15 @@ setup(
         "requests>=2.31.0",
         "rich>=13.0.0",
         "typer>=0.12.0",
+        "pyperclip>=1.8.2",
+        "psutil>=5.9.0",
+        "GitPython>=3.1.0",
+        "watchdog>=3.0.0"
     ],
     entry_points={
         "console_scripts": [
-            "orby=orby_coder.__main:main",
-            "orbycoder=orby_coder.__main:main",
+            "orby=orby_coder.__main__:main",
+            "orbycoder=orby_coder.__main__:main",
         ],
     },
 )

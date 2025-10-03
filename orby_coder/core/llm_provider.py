@@ -6,6 +6,7 @@ from pathlib import Path
 import ollama
 from openai import OpenAI
 from orby_coder.config.config_manager import ModelConfig
+from orby_coder.utils.advanced import WebSearcher, TerminalExecutor
 
 class LocalLLMProvider:
     """Handles communication with local LLM backends."""
@@ -13,15 +14,17 @@ class LocalLLMProvider:
     def __init__(self, config: ModelConfig):
         self.config = config
         self.client = None
+        self.web_searcher = WebSearcher()
+        self.terminal_executor = TerminalExecutor()
         
         if config.backend == "lmstudio":
             # LM Studio uses OpenAI-compatible API
             self.client = OpenAI(base_url=config.lmstudio_base_url, api_key="dummy")
         # For Ollama, we use the ollama library directly
-        
-    def _prepare_messages(self, messages: list) -> list:
-        """Prepare messages for the LLM, ensuring proper format."""
-        # Ensure each message has required fields
+    
+    def _prepare_messages(self, messages: list, context: Optional[Dict] = None) -> list:
+        """Prepare messages for the LLM, ensuring proper format and adding context if needed."""
+        # Add context to messages if provided
         prepared = []
         for msg in messages:
             if isinstance(msg, dict) and 'role' in msg and 'content' in msg:
@@ -29,12 +32,54 @@ class LocalLLMProvider:
             else:
                 # Assume it's user content if not properly formatted
                 prepared.append({"role": "user", "content": str(msg)})
+        
+        # If we have context, add it to the conversation
+        if context:
+            # Add context to the beginning of the conversation
+            context_msg = f"Additional context:\n{json.dumps(context, indent=2)}"
+            prepared.insert(1, {"role": "user", "content": context_msg})
+        
         return prepared
     
-    def chat_complete(self, messages: list, model: Optional[str] = None) -> str:
-        """Get a chat completion from the configured backend."""
+    def _enhanced_process(self, user_prompt: str) -> tuple:
+        """Process user prompt for special commands and context."""
+        # Check if user wants to execute a command or search
+        context = {}
+        
+        # Check for terminal command indicators
+        if any(cmd in user_prompt.lower() for cmd in ['execute:', 'run:', 'terminal:', 'command:']):
+            # Extract command from prompt
+            parts = user_prompt.split(':', 1)
+            if len(parts) > 1:
+                command = parts[1].strip()
+                if self.config.enable_terminal_execution and TerminalExecutor.safe_command(command):
+                    exec_result = TerminalExecutor.execute_command(command)
+                    context['terminal_output'] = exec_result
+        
+        # Check for web search indicators
+        if any(search_term in user_prompt.lower() for search_term in ['search:', 'find:', 'lookup:', 'google:', 'web:']):
+            if self.config.enable_online_search:
+                # Extract search query from prompt
+                search_query = user_prompt
+                for term in ['search:', 'find:', 'lookup:', 'google:', 'web:']:
+                    if term in user_prompt.lower():
+                        search_query = user_prompt.lower().split(term, 1)[1].strip()
+                        break
+                search_results = self.web_searcher.search(search_query)
+                context['web_search_results'] = search_results
+        
+        return context
+    
+    def chat_complete(self, messages: list, model: Optional[str] = None, enable_context: bool = True) -> str:
+        """Get a chat completion from the configured backend with enhanced features."""
         model_name = model or self.config.default_model
-        prepared_messages = self._prepare_messages(messages)
+        
+        # Process first message for special commands if it's a user message
+        context = {}
+        if enable_context and messages and messages[0].get('role') == 'user':
+            context = self._enhanced_process(messages[0].get('content', ''))
+        
+        prepared_messages = self._prepare_messages(messages, context)
         
         if self.config.backend == "ollama":
             try:
@@ -64,10 +109,16 @@ class LocalLLMProvider:
         else:
             raise ValueError(f"Unsupported backend: {self.config.backend}")
     
-    def stream_chat(self, messages: list, model: Optional[str] = None) -> Generator[str, None, None]:
-        """Stream chat completions from the configured backend."""
+    def stream_chat(self, messages: list, model: Optional[str] = None, enable_context: bool = True) -> Generator[str, None, None]:
+        """Stream chat completions from the configured backend with enhanced features."""
         model_name = model or self.config.default_model
-        prepared_messages = self._prepare_messages(messages)
+        
+        # Process first message for special commands if it's a user message
+        context = {}
+        if enable_context and messages and messages[0].get('role') == 'user':
+            context = self._enhanced_process(messages[0].get('content', ''))
+        
+        prepared_messages = self._prepare_messages(messages, context)
         
         if self.config.backend == "ollama":
             try:
