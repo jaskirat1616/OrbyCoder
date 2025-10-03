@@ -63,19 +63,33 @@ class ChatHistoryContainer(ScrollableContainer):
         super().__init__()
         self.messages = []
         self.border_title = "Chat"
+        self._messages_to_add = []  # Store messages until mounted
+    
+    def compose(self) -> ComposeResult:
+        """Compose the widget."""
+        # Add any pre-mounted messages
+        for role, content in self._messages_to_add:
+            yield MessageContainer(role, content)
+            self.messages.append((role, content))
+        self._messages_to_add.clear()
     
     def add_message(self, role: str, content: str):
         """Add a message to the chat history."""
-        message_container = MessageContainer(role, content)
-        self.mount(message_container)
-        self.scroll_end(animate=False, speed=50)
-        self.messages.append((role, content))
+        if self.is_mounted:
+            message_container = MessageContainer(role, content)
+            self.mount(message_container)
+            self.scroll_end(animate=False, speed=50)
+            self.messages.append((role, content))
+        else:
+            # Store for when widget is mounted
+            self._messages_to_add.append((role, content))
     
     def clear_messages(self):
         """Clear all messages from the chat history."""
         for child in self.children:
             child.remove()
         self.messages.clear()
+        self._messages_to_add.clear()
 
 class CodeView(ScrollableContainer):
     """Display code content."""
@@ -84,7 +98,10 @@ class CodeView(ScrollableContainer):
         super().__init__()
         self.border_title = "Code View"
         self.code_content = Static("", classes="code-display")
-        self.mount(self.code_content)
+    
+    def compose(self) -> ComposeResult:
+        """Compose the widget."""
+        yield self.code_content
     
     def update_code(self, code: str):
         """Update the displayed code."""
@@ -253,11 +270,41 @@ class OrbyTUI(App):
         self.input_widget = InputWidget(placeholder="Message Orby...")
         self.thinking_indicator = ThinkingAnimation(id="thinking-indicator")
         self.thinking_container = Horizontal(classes="thinking-container", id="thinking-container")
-        self.thinking_container.mount(self.thinking_indicator)
         self.thinking_container.visible = False
         self.input_history = []
         self.history_index = -1
         self.current_response = ""
+    
+    def compose(self) -> ComposeResult:
+        """Create child widgets for the app."""
+        yield Header(name="Orby Coder", show_clock=True)
+        
+        with Vertical(id="main-container"):
+            with Horizontal(id="chat-container"):
+                # Left panel: Chat history
+                with Vertical(id="chat-history-panel"):
+                    yield self.chat_history
+                    yield self.thinking_container  # Add container to the layout
+            
+            # Right panel: Code/files view (hidden by default)
+            with Vertical(id="code-view-panel", classes="code-panel"):
+                yield self.code_view
+                self.code_view.display = False  # Hidden by default
+        
+        # Bottom input bar
+        with Container(id="input-container"):
+            yield self.input_widget
+        
+        # Status bar
+        yield Static(
+            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} ",
+            id="status-bar"
+        )
+    
+    def on_mount(self) -> None:
+        """Called when app starts - add children after mounting."""
+        # Add the thinking indicator to its container after both are mounted
+        self.thinking_container.mount(self.thinking_indicator)
         
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -268,6 +315,8 @@ class OrbyTUI(App):
                 # Left panel: Chat history
                 with Vertical(id="chat-history-panel"):
                     yield self.chat_history
+                    # Add thinking indicator to the container
+                    self.thinking_container.compose_add_child(self.thinking_indicator)
                     yield self.thinking_container
             
             # Right panel: Code/files view (hidden by default)
