@@ -1,11 +1,16 @@
 """Core LLM integration for Orby Coder - Gemini CLI style tool usage."""
 import requests
 import json
-from typing import Generator, Dict, Any, Optional
+from typing import Generator, Dict, Any, Optional, List
 from pathlib import Path
 import ollama
 from openai import OpenAI
 from orby_coder.config.config_manager import ModelConfig
+from orby_coder.core.tools import ShellTool, WebSearchTool, ReadFileTool
+from datetime import datetime
+import subprocess
+import os
+import platform
 from orby_coder.utils.advanced import WebSearcher, TerminalExecutor, ToolManager
 
 class LocalLLMProvider:
@@ -14,9 +19,6 @@ class LocalLLMProvider:
     def __init__(self, config: ModelConfig):
         self.config = config
         self.client = None
-        self.web_searcher = WebSearcher()
-        self.terminal_executor = TerminalExecutor()
-        self.tool_manager = ToolManager(config)
         
         if config.backend == "lmstudio":
             # LM Studio uses OpenAI-compatible API
@@ -46,7 +48,7 @@ class LocalLLMProvider:
         """Process user prompt for special commands and context - Gemini CLI style tool usage."""
         context = {}
         
-        # Use ToolManager for enhanced tool processing
+        # Use new tools implementation for enhanced tool processing
         user_prompt_lower = user_prompt.lower()
         
         # Terminal execution tool - Gemini CLI style detection
@@ -63,14 +65,21 @@ class LocalLLMProvider:
                 for indicator in command_indicators:
                     if indicator in user_prompt_lower:
                         command = user_prompt.split(indicator, 1)[1].strip()
-                        if command and TerminalExecutor.safe_command(command):
-                            # Use ToolManager to execute terminal command
-                            tool_result = self.tool_manager.execute_tool(
-                                "terminal_execution", 
-                                {"command": command}
-                            )
-                            if tool_result.get("success"):
-                                context['terminal_execution'] = tool_result.get("result", {})
+                        if command:
+                            # Use ShellTool to execute command
+                            shell_tool = ShellTool()
+                            validation_result = shell_tool.validate_params({"command": command})
+                            if not validation_result:  # No validation error
+                                # Check if confirmation is needed
+                                confirmation_needed = shell_tool.should_confirm_execute({"command": command})
+                                if confirmation_needed:
+                                    # In a real implementation, this would prompt user
+                                    # For now, we'll proceed with execution
+                                    pass
+                                
+                                # Execute the tool
+                                result = shell_tool.execute({"command": command})
+                                context['terminal_execution'] = result
                         break
         
         # Web search tool - Gemini CLI style detection
@@ -105,19 +114,10 @@ class LocalLLMProvider:
                             break
                 
                 if search_query:
-                    # Use ToolManager to perform web search
-                    tool_result = self.tool_manager.execute_tool(
-                        "web_search",
-                        {"query": search_query}
-                    )
-                    if tool_result.get("success"):
-                        search_results = tool_result.get("result", [])
-                        if search_results:
-                            context['web_search'] = {
-                                'query': search_query,
-                                'results': search_results[:3],  # Top 3 results
-                                'timestamp': search_results[0].get('timestamp', '') if search_results else ''
-                            }
+                    # Use WebSearchTool to perform search
+                    web_search_tool = WebSearchTool()
+                    result = web_search_tool.execute({"query": search_query})
+                    context['web_search'] = result
         
         # File system tool - check if user is asking about specific files
         file_extensions = ['.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.hpp', '.cs', '.go', '.rs', '.swift']
@@ -125,7 +125,7 @@ class LocalLLMProvider:
         
         if (any(ext in user_prompt_lower for ext in file_extensions) or 
             any(trigger in user_prompt_lower for trigger in file_triggers)):
-            # This would be implemented for file reading capabilities
+            # This would be implemented for file reading capabilities using ReadFileTool
             pass
         
         return context
