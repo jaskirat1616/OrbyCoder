@@ -67,8 +67,11 @@ def chat_command(
             elif user_input.lower() == 'models':
                 try:
                     models = llm.list_models()
-                    models_list = "\n".join([f"• {model}" for model in models])
-                    console.print(Panel(models_list, title="Available Models"))
+                    if models:
+                        models_list = "\n".join([f"• {model}" for model in models])
+                        console.print(Panel(models_list, title="Available Models"))
+                    else:
+                        console.print("[yellow]No models found or backend not accessible.[/yellow]")
                 except Exception as e:
                     console.print(f"[red]Error listing models:[/red] {str(e)}")
                 continue
@@ -160,28 +163,41 @@ def chat_command(
                 spinner = Spinner("clock", "Orby is thinking...")
                 with Live(spinner, console=console, refresh_per_second=10) as live:
                     time.sleep(0.5)  # Brief pause to show thinking
+                    try:
+                        if stream:
+                            response = ""
+                            for chunk in llm.stream_chat(messages, model, enable_context):
+                                response += chunk
+                            live.update(Panel(Markdown(response), title="Orby's Response"))
+                            time.sleep(0.1)  # Brief pause before showing response
+                        else:
+                            response = llm.chat_complete(messages, model, enable_context)
+                            live.update(Panel(Markdown(response), title="Orby's Response"))
+                            time.sleep(0.1)  # Brief pause before showing response
+                    except Exception as e:
+                        error_msg = str(e)
+                        live.update(Panel(f"[red]Error:[/red] {error_msg}", title="Error"))
+                        time.sleep(2)  # Show error for 2 seconds
+                        continue
+            else:
+                try:
                     if stream:
+                        console.print("[bold yellow]Orby:[/bold yellow] ", end="")
                         response = ""
                         for chunk in llm.stream_chat(messages, model, enable_context):
+                            console.print(chunk, end="", markup=False)
                             response += chunk
-                        live.update(Panel(Markdown(response), title="Orby's Response"))
-                        time.sleep(0.1)  # Brief pause before showing response
+                        console.print()  # New line after streaming
                     else:
                         response = llm.chat_complete(messages, model, enable_context)
-                        live.update(Panel(Markdown(response), title="Orby's Response"))
-                        time.sleep(0.1)  # Brief pause before showing response
-            else:
-                if stream:
-                    console.print("[bold yellow]Orby:[/bold yellow] ", end="")
-                    response = ""
-                    for chunk in llm.stream_chat(messages, model, enable_context):
-                        console.print(chunk, end="", markup=False)
-                        response += chunk
-                    console.print()  # New line after streaming
-                else:
-                    response = llm.chat_complete(messages, model, enable_context)
-                    panel = Panel(Markdown(response), title="Orby's Response")
-                    console.print(panel)
+                        panel = Panel(Markdown(response), title="Orby's Response")
+                        console.print(panel)
+                except Exception as e:
+                    error_msg = str(e)
+                    console.print(f"[red]Error:[/red] {error_msg}")
+                    if "not found" in error_msg.lower() and "ollama pull" in error_msg:
+                        console.print("[yellow]Tip:[/yellow] Run the suggested command to download the model first.")
+                    continue
     else:
         # Process single prompt
         messages = [
@@ -193,23 +209,35 @@ def chat_command(
             spinner = Spinner("clock", "Orby is thinking...")
             with Live(spinner, console=console, refresh_per_second=10) as live:
                 time.sleep(0.5)  # Brief pause to show thinking
+                try:
+                    if stream:
+                        response = ""
+                        for chunk in llm.stream_chat(messages, model, enable_context):
+                            response += chunk
+                        live.update(Panel(Markdown(response), title="Orby's Response"))
+                    else:
+                        response = llm.chat_complete(messages, model, enable_context)
+                        live.update(Panel(Markdown(response), title="Orby's Response"))
+                except Exception as e:
+                    error_msg = str(e)
+                    live.update(Panel(f"[red]Error:[/red] {error_msg}", title="Error"))
+                    return
+        else:
+            try:
                 if stream:
+                    console.print("[bold yellow]Orby:[/bold yellow] ", end="")
                     response = ""
                     for chunk in llm.stream_chat(messages, model, enable_context):
+                        console.print(chunk, end="", markup=False)
                         response += chunk
-                    live.update(Panel(Markdown(response), title="Orby's Response"))
+                    console.print()  # New line after streaming
                 else:
                     response = llm.chat_complete(messages, model, enable_context)
-                    live.update(Panel(Markdown(response), title="Orby's Response"))
-        else:
-            if stream:
-                console.print("[bold yellow]Orby:[/bold yellow] ", end="")
-                response = ""
-                for chunk in llm.stream_chat(messages, model, enable_context):
-                    console.print(chunk, end="", markup=False)
-                    response += chunk
-                console.print()  # New line after streaming
-            else:
-                response = llm.chat_complete(messages, model, enable_context)
-                panel = Panel(Markdown(response), title="Orby's Response")
-                console.print(panel)
+                    panel = Panel(Markdown(response), title="Orby's Response")
+                    console.print(panel)
+            except Exception as e:
+                error_msg = str(e)
+                console.print(f"[red]Error:[/red] {error_msg}")
+                if "not found" in error_msg.lower() and "ollama pull" in error_msg:
+                    console.print("[yellow]Tip:[/yellow] Run the suggested command to download the model first.")
+                return

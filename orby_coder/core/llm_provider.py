@@ -93,7 +93,11 @@ class LocalLLMProvider:
                 )
                 return response['message']['content']
             except Exception as e:
-                raise RuntimeError(f"Error with Ollama: {str(e)}")
+                error_msg = str(e)
+                if "not found" in error_msg.lower():
+                    raise RuntimeError(f"Model '{model_name}' not found. Please pull the model first with: ollama pull {model_name}")
+                else:
+                    raise RuntimeError(f"Error with Ollama: {error_msg}")
                 
         elif self.config.backend == "lmstudio":
             try:
@@ -135,7 +139,11 @@ class LocalLLMProvider:
                     if 'message' in chunk and 'content' in chunk['message']:
                         yield chunk['message']['content']
             except Exception as e:
-                raise RuntimeError(f"Error streaming with Ollama: {str(e)}")
+                error_msg = str(e)
+                if "not found" in error_msg.lower():
+                    raise RuntimeError(f"Model '{model_name}' not found. Please pull the model first with: ollama pull {model_name}")
+                else:
+                    raise RuntimeError(f"Error streaming with Ollama: {error_msg}")
                 
         elif self.config.backend == "lmstudio":
             try:
@@ -159,9 +167,28 @@ class LocalLLMProvider:
         if self.config.backend == "ollama":
             try:
                 response = ollama.list()
-                return [model['name'] for model in response['models']]
+                # Handle different response formats
+                if 'models' in response:
+                    models = response['models']
+                    # Extract model names, handling different key structures
+                    model_names = []
+                    for model in models:
+                        if isinstance(model, dict):
+                            # Try different possible keys for model name
+                            name = model.get('name') or model.get('model') or model.get('id')
+                            if name:
+                                model_names.append(name)
+                        else:
+                            # If model is a string
+                            model_names.append(str(model))
+                    return model_names if model_names else [self.config.default_model]
+                else:
+                    # Fallback to default model if response format is unexpected
+                    return [self.config.default_model]
             except Exception as e:
-                raise RuntimeError(f"Error listing Ollama models: {str(e)}")
+                # Return default model if listing fails
+                print(f"Warning: Could not list Ollama models: {str(e)}")
+                return [self.config.default_model]
                 
         elif self.config.backend == "lmstudio":
             try:
@@ -169,7 +196,26 @@ class LocalLLMProvider:
                 response = requests.get(f"{self.config.lmstudio_base_url}/models", timeout=10)
                 if response.status_code == 200:
                     data = response.json()
-                    return [model.get('id', model.get('name', 'unknown')) for model in data.get('data', [])]
+                    # Handle different response formats
+                    if 'data' in data:
+                        models_data = data['data']
+                    elif 'models' in data:
+                        models_data = data['models']
+                    else:
+                        models_data = []
+                    
+                    model_names = []
+                    for model in models_data:
+                        if isinstance(model, dict):
+                            # Try different possible keys for model name
+                            name = model.get('id') or model.get('name') or model.get('model')
+                            if name:
+                                model_names.append(name)
+                        else:
+                            # If model is a string
+                            model_names.append(str(model))
+                    
+                    return model_names if model_names else [self.config.default_model]
                 else:
                     # If /models endpoint doesn't exist, return default
                     return [self.config.default_model]
@@ -177,9 +223,12 @@ class LocalLLMProvider:
                 # If request fails, return default model
                 return [self.config.default_model]
             except Exception as e:
-                raise RuntimeError(f"Error listing LM Studio models: {str(e)}")
+                # Return default model if listing fails
+                print(f"Warning: Could not list LM Studio models: {str(e)}")
+                return [self.config.default_model]
         else:
-            raise ValueError(f"Unsupported backend: {self.config.backend}")
+            # Return default model for unsupported backends
+            return [self.config.default_model]
     
     def test_connection(self) -> bool:
         """Test connection to the configured backend."""
