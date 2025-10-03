@@ -8,10 +8,11 @@ Orby Coder is an open-source AI CLI tool designed for coding and development. It
 - **Interactive Chat**: Engage in conversations with AI about code
 - **Code Generation**: Generate, modify, and explain code snippets
 - **File Editing**: Direct file modification with AI assistance
-- **Terminal Execution**: Execute commands with user permissions
-- **Online Search**: Search the web when needed for context
+- **Terminal Execution**: Execute commands with user permissions (Gemini CLI-style tool)
+- **Online Search**: Search the web when needed for context (Gemini CLI-style tool)
 - **IDE Integration**: Connect with VSCode, Cursor and other editors
 - **Interactive TUI**: Rich Gemini CLI-like terminal UI powered by Textual
+- **Tool Orchestration**: Automatic tool usage based on context (Gemini CLI-style)
 - **Configurable**: Easy configuration for different backends and models
 
 ## 🛠️ Installation
@@ -84,6 +85,16 @@ In the interactive chat mode, you can use these special commands:
 - `execute: command` - Execute terminal command
 - `search: query` - Search the web
 - `exit/quit/q` - Exit the application
+
+### Gemini CLI-Style Tools
+
+Orby Coder automatically uses tools when appropriate, just like the Gemini CLI:
+- **Terminal Execution**: Automatically executes commands to verify code, run tests, or gather system information
+- **Web Search**: Automatically searches the web for current information or topics it's uncertain about
+- **File Operations**: Reads and analyzes files when referenced in conversations
+- **IDE Integration**: Opens files and folders in VSCode or Cursor when needed
+
+Tools are used contextually without requiring explicit commands in most cases.
 - IDE integration controls
 - Online search integration
 

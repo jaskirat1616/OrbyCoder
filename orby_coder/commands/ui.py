@@ -134,14 +134,16 @@ class OrbyTUI(App):
     
     CSS = """
     Screen {
-        background: $surface;
+        background: #1e1e1e;  /* Dark background like Gemini */
+        color: #e0e0e0;       /* Light text */
         layers: base floating;
     }
 
     Header {
-        background: $primary;
-        color: $text;
+        background: #333333;  /* Darker header */
+        color: #ffffff;
         height: 1;
+        text-style: bold;
     }
     
     #main-container {
@@ -160,96 +162,124 @@ class OrbyTUI(App):
         height: 1fr;
         min-width: 50;
         border: none;
+        background: #2d2d2d;  /* Slightly lighter than background */
     }
     
     #code-view-panel {
         width: 40;
         height: 1fr;
-        border-left: solid $primary;
+        border-left: solid #444444;
         display: block;
+        background: #252526;   /* Code panel background */
     }
     
     #input-container {
-        height: 10;
-        border-top: solid $primary;
+        height: 8;             /* Smaller input area like Gemini */
+        border-top: solid #444444;
         padding: 1 1 0 1;
+        background: #3c3c3c;  /* Input area background */
     }
     
     #status-bar {
         height: 1;
         dock: bottom;
-        background: $surface;
-        color: $text;
+        background: #333333;
+        color: #cccccc;
         content-align: left middle;
-        border-top: solid $primary;
-        text-opacity: 80%;
+        border-top: solid #444444;
+        text-opacity: 90%;
+        font-size: small;
     }
     
     .message-container {
-        padding: 1 1;
+        padding: 1 2;          /* More padding like Gemini */
         width: 1fr;
+        border-bottom: solid #3a3a3a 1;  /* Subtle separators */
     }
     
     .user-message {
-        background: $surface;
+        background: #2d2d2d;
     }
     
     .assistant-message {
-        background: $panel;
+        background: #252526;
     }
     
     .message-role {
-        width: 15;
+        width: 12;             /* Narrower role column */
         text-style: bold;
-        text-opacity: 80%;
+        text-opacity: 85%;
+        padding-right: 1;
     }
     
     .user-role {
-        color: $success;
+        color: #4ec9b0;        /* Teal color for user */
     }
     
     .assistant-role {
-        color: $warning;
+        color: #569cd6;        /* Blue color for assistant like Gemini */
     }
     
     .message-content {
         width: 1fr;
         padding-left: 1;
+        color: #d4d4d4;        /* Light text */
     }
     
     .user-content {
-        color: $text;
+        color: #d4d4d4;
     }
     
     .assistant-content {
-        color: $text;
+        color: #d4d4d4;
     }
     
     .code-display {
-        background: $surface-darken-1;
+        background: #1e1e1e;   /* Dark code background */
         padding: 1;
         height: 1fr;
+        border: solid #3c3c3c 1;
     }
     
     .thinking-container {
         height: 3;
         content-align: center middle;
         padding: 1;
+        background: #252526;
     }
     
     #thinking-indicator {
-        text-opacity: 60%;
+        text-opacity: 70%;
+        color: #569cd6;        /* Blue color for thinking indicator */
     }
     
     TextArea {
         border: none;
-        background: $surface;
+        background: #3c3c3c;
+        color: #ffffff;
         height: 1fr;
         min-height: 5;
+        padding: 1;
     }
     
     .markdown {
         text-opacity: 100%;
+    }
+    
+    /* Gemini-like styling for code blocks */
+    .code-block {
+        background: #1e1e1e;
+        border: solid #3c3c3c 1;
+        padding: 1;
+    }
+    
+    /* Scrollbar styling */
+    .-scrollbar {
+        background: #3c3c3c;
+    }
+    
+    .-scrollbar-thumb {
+        background: #555555;
     }
     """
     
@@ -281,7 +311,7 @@ class OrbyTUI(App):
     
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header(name="Orby Coder", show_clock=True)
+        yield Header(name="Orby", show_clock=True)
         
         with Vertical(id="main-container"):
             with Horizontal(id="chat-container"):
@@ -299,9 +329,9 @@ class OrbyTUI(App):
         with Container(id="input-container"):
             yield self.input_widget
         
-        # Status bar
+        # Status bar with Gemini-like styling
         yield Static(
-            f" Orby Coder | Model: {self.config.default_model} | Backend: {self.config.backend} | Online: {'ON' if self.config.enable_online_search else 'OFF'} | Terminal: {'ON' if self.config.enable_terminal_execution else 'OFF'} ",
+            f" Model: {self.config.default_model} | Backend: {self.config.backend} | Search: {'ON' if self.config.enable_online_search else 'OFF'} | Terminal: {'ON' if self.config.enable_terminal_execution else 'OFF'} ",
             id="status-bar"
         )
     
@@ -315,12 +345,21 @@ class OrbyTUI(App):
         
         # Add welcome message similar to Gemini CLI
         welcome_msg = (
-            "Hello! I'm Orby, your AI coding assistant.\n\n"
-            "• Ask me to explain code\n"
-            "• Request code generation or fixes\n"
-            "• Ask me to analyze files\n"
-            "• Type 'help' for more commands\n"
-            "• Use Ctrl+T for Terminal commands, Ctrl+S for Web Search"
+            "👋 Hello! I'm Orby, your AI coding assistant powered by Google DeepMind technology.\n\n"
+            "**What I can help you with:**\n"
+            "• 🧑‍💻 Explaining code and concepts\n"
+            "• 🛠️ Generating and debugging code\n"
+            "• 📚 Teaching programming fundamentals\n"
+            "• 🔍 Researching technical topics\n"
+            "• 🧪 Executing and testing code snippets\n\n"
+            "**Getting Started:**\n"
+            "Just type your coding question or task, and I'll assist you.\n"
+            "Type `help` for a list of special commands.\n\n"
+            "**Connected Tools:**\n"
+            "• 🔗 Web Search (enabled)\n"
+            "• 💻 Terminal Execution (enabled)\n"
+            "• 📂 IDE Integration (VSCode, Cursor)\n\n"
+            "*Powered by local AI models for privacy-focused assistance.*"
         )
         self.chat_history.add_message("Orby", welcome_msg)
 

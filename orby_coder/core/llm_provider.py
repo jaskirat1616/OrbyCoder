@@ -1,4 +1,4 @@
-"""Core LLM integration for Orby Coder."""
+"""Core LLM integration for Orby Coder - Gemini CLI style tool usage."""
 import requests
 import json
 from typing import Generator, Dict, Any, Optional
@@ -6,7 +6,7 @@ from pathlib import Path
 import ollama
 from openai import OpenAI
 from orby_coder.config.config_manager import ModelConfig
-from orby_coder.utils.advanced import WebSearcher, TerminalExecutor
+from orby_coder.utils.advanced import WebSearcher, TerminalExecutor, ToolManager
 
 class LocalLLMProvider:
     """Handles communication with local LLM backends."""
@@ -16,6 +16,7 @@ class LocalLLMProvider:
         self.client = None
         self.web_searcher = WebSearcher()
         self.terminal_executor = TerminalExecutor()
+        self.tool_manager = ToolManager(config)
         
         if config.backend == "lmstudio":
             # LM Studio uses OpenAI-compatible API
@@ -41,32 +42,91 @@ class LocalLLMProvider:
         
         return prepared
     
-    def _enhanced_process(self, user_prompt: str) -> tuple:
-        """Process user prompt for special commands and context."""
-        # Check if user wants to execute a command or search
+    def _enhanced_process(self, user_prompt: str) -> dict:
+        """Process user prompt for special commands and context - Gemini CLI style tool usage."""
         context = {}
         
-        # Check for terminal command indicators
-        if any(cmd in user_prompt.lower() for cmd in ['execute:', 'run:', 'terminal:', 'command:']):
-            # Extract command from prompt
-            parts = user_prompt.split(':', 1)
-            if len(parts) > 1:
-                command = parts[1].strip()
-                if self.config.enable_terminal_execution and TerminalExecutor.safe_command(command):
-                    exec_result = TerminalExecutor.execute_command(command)
-                    context['terminal_output'] = exec_result
+        # Use ToolManager for enhanced tool processing
+        user_prompt_lower = user_prompt.lower()
         
-        # Check for web search indicators
-        if any(search_term in user_prompt.lower() for search_term in ['search:', 'find:', 'lookup:', 'google:', 'web:']):
-            if self.config.enable_online_search:
-                # Extract search query from prompt
-                search_query = user_prompt
-                for term in ['search:', 'find:', 'lookup:', 'google:', 'web:']:
-                    if term in user_prompt.lower():
-                        search_query = user_prompt.lower().split(term, 1)[1].strip()
+        # Terminal execution tool - Gemini CLI style detection
+        if self.config.enable_terminal_execution:
+            terminal_triggers = [
+                'execute:', 'run:', 'terminal:', 'command:', 
+                'can you run', 'please run', 'try running',
+                'run this command', 'execute this', 'terminal command'
+            ]
+            
+            if any(trigger in user_prompt_lower for trigger in terminal_triggers):
+                # Extract command using regex-like approach
+                command_indicators = ['execute:', 'run:', 'terminal:', 'command:']
+                for indicator in command_indicators:
+                    if indicator in user_prompt_lower:
+                        command = user_prompt.split(indicator, 1)[1].strip()
+                        if command and TerminalExecutor.safe_command(command):
+                            # Use ToolManager to execute terminal command
+                            tool_result = self.tool_manager.execute_tool(
+                                "terminal_execution", 
+                                {"command": command}
+                            )
+                            if tool_result.get("success"):
+                                context['terminal_execution'] = tool_result.get("result", {})
                         break
-                search_results = self.web_searcher.search(search_query)
-                context['web_search_results'] = search_results
+        
+        # Web search tool - Gemini CLI style detection
+        if self.config.enable_online_search:
+            search_triggers = [
+                'search:', 'find:', 'lookup:', 'google:', 'web:',
+                'can you search', 'please search', 'look up',
+                'what is', 'who is', 'when was', 'how does', 'why is',
+                'current status', 'latest news', 'recent updates'
+            ]
+            
+            if any(trigger in user_prompt_lower for trigger in search_triggers):
+                # Extract search query
+                search_indicators = ['search:', 'find:', 'lookup:', 'google:', 'web:']
+                search_query = user_prompt
+                
+                for indicator in search_indicators:
+                    if indicator in user_prompt_lower:
+                        search_query = user_prompt.split(indicator, 1)[1].strip()
+                        break
+                
+                # If no explicit indicator, use the whole query for general search terms
+                if search_query == user_prompt:
+                    # Check for general knowledge questions
+                    question_indicators = [
+                        'what is', 'who is', 'when was', 'how does', 'why is',
+                        'current', 'latest', 'recent', 'news', 'status'
+                    ]
+                    for q_indicator in question_indicators:
+                        if q_indicator in user_prompt_lower:
+                            search_query = user_prompt
+                            break
+                
+                if search_query:
+                    # Use ToolManager to perform web search
+                    tool_result = self.tool_manager.execute_tool(
+                        "web_search",
+                        {"query": search_query}
+                    )
+                    if tool_result.get("success"):
+                        search_results = tool_result.get("result", [])
+                        if search_results:
+                            context['web_search'] = {
+                                'query': search_query,
+                                'results': search_results[:3],  # Top 3 results
+                                'timestamp': search_results[0].get('timestamp', '') if search_results else ''
+                            }
+        
+        # File system tool - check if user is asking about specific files
+        file_extensions = ['.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.hpp', '.cs', '.go', '.rs', '.swift']
+        file_triggers = ['file:', 'read file', 'open file', 'contents of', 'show me the file']
+        
+        if (any(ext in user_prompt_lower for ext in file_extensions) or 
+            any(trigger in user_prompt_lower for trigger in file_triggers)):
+            # This would be implemented for file reading capabilities
+            pass
         
         return context
     
@@ -79,7 +139,40 @@ class LocalLLMProvider:
         if enable_context and messages and messages[0].get('role') == 'user':
             context = self._enhanced_process(messages[0].get('content', ''))
         
+        # Enhance messages with tool usage context if needed
         prepared_messages = self._prepare_messages(messages, context)
+        
+        # Add tool usage instructions to system prompt for better tool utilization
+        if context:
+            tool_instructions = (
+                "\n\n[TOOL USAGE INSTRUCTIONS]\n"
+                "You have access to the following tools that can be used when appropriate:\n"
+            )
+            
+            if 'terminal_execution' in context:
+                tool_instructions += (
+                    "TERMINAL EXECUTION: You can execute commands to verify code, run tests, or gather system information.\n"
+                    "Usage: Prefix your response with TERMINAL: followed by the command to execute.\n"
+                )
+            
+            if 'web_search' in context:
+                tool_instructions += (
+                    "WEB SEARCH: You can search the web for current information or topics you're uncertain about.\n"
+                    "Usage: Prefix your response with SEARCH: followed by your search query.\n"
+                )
+            
+            # Add tool instructions to the last system message or create one
+            system_message_found = False
+            for i, msg in enumerate(prepared_messages):
+                if msg.get('role') == 'system':
+                    if isinstance(msg.get('content'), str):
+                        prepared_messages[i]['content'] += tool_instructions
+                    system_message_found = True
+                    break
+            
+            # If no system message found, add one at the beginning
+            if not system_message_found:
+                prepared_messages.insert(0, {"role": "system", "content": self.config.system_prompt + tool_instructions})
         
         if self.config.backend == "ollama":
             try:
@@ -122,7 +215,40 @@ class LocalLLMProvider:
         if enable_context and messages and messages[0].get('role') == 'user':
             context = self._enhanced_process(messages[0].get('content', ''))
         
+        # Enhance messages with tool usage context if needed
         prepared_messages = self._prepare_messages(messages, context)
+        
+        # Add tool usage instructions to system prompt for better tool utilization
+        if context:
+            tool_instructions = (
+                "\n\n[TOOL USAGE INSTRUCTIONS]\n"
+                "You have access to the following tools that can be used when appropriate:\n"
+            )
+            
+            if 'terminal_execution' in context:
+                tool_instructions += (
+                    "TERMINAL EXECUTION: You can execute commands to verify code, run tests, or gather system information.\n"
+                    "Usage: Prefix your response with TERMINAL: followed by the command to execute.\n"
+                )
+            
+            if 'web_search' in context:
+                tool_instructions += (
+                    "WEB SEARCH: You can search the web for current information or topics you're uncertain about.\n"
+                    "Usage: Prefix your response with SEARCH: followed by your search query.\n"
+                )
+            
+            # Add tool instructions to the last system message or create one
+            system_message_found = False
+            for i, msg in enumerate(prepared_messages):
+                if msg.get('role') == 'system':
+                    if isinstance(msg.get('content'), str):
+                        prepared_messages[i]['content'] += tool_instructions
+                    system_message_found = True
+                    break
+            
+            # If no system message found, add one at the beginning
+            if not system_message_found:
+                prepared_messages.insert(0, {"role": "system", "content": self.config.system_prompt + tool_instructions})
         
         if self.config.backend == "ollama":
             try:
